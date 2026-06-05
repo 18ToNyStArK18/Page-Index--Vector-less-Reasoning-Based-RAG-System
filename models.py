@@ -6,6 +6,6 @@ class TreeNode:
     node_id : str
     title : str
     summary : str
-    start : int
-    end : int
+    page_start : int
+    page_end : int
     children : List[TreeNode] = field(default_factory=list)

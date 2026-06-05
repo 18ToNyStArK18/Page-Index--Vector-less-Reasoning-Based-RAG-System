@@ -5,12 +5,9 @@ import fitz
 from rich.tree import Tree as RichTree
 from rich import print as rich_print
 import asyncio
-from google import genai
-from google.genai import types
-#TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
-#TODO: need to extract the pdf content and pass it accordingly
-#TODO: need to pass it to the llm for proper summary
+import aiohttp
 
+#TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
 
 
 
@@ -43,8 +40,9 @@ class TreeBuilder:
         self.max_pages_per_node = max_pages_per_node
         self.nodes = 1
         self.semaphore = asyncio.Semaphore(max_concurrent_calls)
-        self.client = genai.Client() 
-             
+        self.local_model = "llama3.2:3b"
+        self.ollama_url = "http://localhost:11434/api/generate"
+         
     def buildLeafNodes(self,title: str , page_start: int , page_end: int)-> List[TreeNode]:
         """
             this takes the content in the section and if the content is large it splits into chuncks
@@ -160,22 +158,62 @@ class TreeBuilder:
             self.visualize_with_rich(child, rich_tree_root)
             
         return rich_tree_root
+    
     async def call_llm_leaf_summary(self, title: str, raw_text: str) -> str:
         async with self.semaphore:
-            prompt = f"Write a dense, 2-sentence routing summary... Text: {raw_text[:1000]}"
-            print(f"   [API] Calling LLM for leaf: {title}...")
-            # api call here
-            asyncio.sleep(5)
-            return f"Detailed summary of raw text for {title}."
+            prompt = f"""
+            You are a technical document routing agent.
+            Write a dense, 5-sentence routing summary of this section: '{title}'. 
+            Capture the core concepts and keywords to help a search engine find this page later.
+            
+            Text Content:
+            {raw_text[:3000]} 
+            """
+            print(f"   [Local API] Calling {self.local_model} for leaf: {title}...")
+            
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(self.ollama_url, json={
+                        "model": self.local_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.2}
+                    }) as response:
+                        result_data = await response.json()
+                        result = result_data['response'].strip()
+            except Exception as e:
+                print(f"   [ERROR] Failed on {title}: {e}")
+                result = f"Summary unavailable for {title} due to local API error."
 
+            return result
+    
     async def call_llm_branch_summary(self, title: str, child_summaries: List[str]) -> str:
         async with self.semaphore:
             combined_children = "\n".join([f"- {s}" for s in child_summaries])
-            prompt = f"Synthesize these sub-section summaries... Sub-sections:\n{combined_children}"
-            print(f" [API] Calling LLM for branch: {title}...")
-            #api call here
+            prompt = f"""
+            You are a technical document routing agent.
+            Synthesize these sub-section summaries into a single, cohesive 5-sentence 
+            overarching summary for the parent chapter: '{title}'.
             
-            return f"High-level rolled-up summary covering {len(child_summaries)} sub-sections."
+            Sub-sections:
+            {combined_children}
+            """
+            print(f" [Local API] Calling {self.local_model} for branch roll-up: {title}...")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(self.ollama_url, json={
+                        "model": self.local_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.2}
+                    }) as response:
+                        result_data = await response.json()
+                        result = result_data['response'].strip()
+            except Exception as e:
+                print(f" [ERROR] Failed on branch {title}: {e}")
+                result = f"Branch summary unavailable for {title}."
+
+            return result
 
     async def populate_tree_summaries_dfs(self,node:TreeNode,pdf):
         """
@@ -205,5 +243,5 @@ chapter_nodes = tree.compile_tree(nested_toc)
 # for node in chapter_nodes:
 #     rich_print(tree.visualize_with_rich(node))
 
-asyncio.run(tree.populate_tree_summaries_dfs(chapter_nodes[2], pdf))
-rich_print(tree.visualize_with_rich(chapter_nodes[2]))
+asyncio.run(tree.populate_tree_summaries_dfs(chapter_nodes[4], pdf))
+rich_print(tree.visualize_with_rich(chapter_nodes[4]))

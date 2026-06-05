@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import List , Dict , Any
 from models import TreeNode
-
+import fitz
 #TODO: Build the actual toc from the document
 #for this if the metadata has the toc we can get the toc directly using the pymupdf library else
 # we can send the first 20 pages of the document to an llm to generate the toc 
@@ -70,7 +70,56 @@ class TreeBuilder:
             chapter_nodes.append(self.process_toc_nodes(item))
         return chapter_nodes
     
-## mock data
+    def extract_nested_toc_from_pdf(self,pdf_path: str) -> List[Dict[str, Any]]:
+        """ this function extracts the toc from the documment and then returns the toc skeleton"""
+        doc = fitz.open(pdf_path)
+        total_pages = doc.page_count
+        raw_toc = doc.get_toc()
+
+        if not raw_toc:
+            """need to call the fucntion which sends the first 20 pages to llm to generate the toc"""
+        normalized_toc = []
+        for i in range(len(raw_toc)):
+            level , title , page = raw_toc[i]
+            end_page = total_pages
+            for j in range(i+1,len(raw_toc)):
+                next_lvl, _, next_start = raw_toc[j]
+                if(next_lvl <= level):
+                    end_page = max(page,next_start)
+                    break
+            normalized_toc.append({
+            "level": level,
+            "title": title,
+            "page_start": page,
+            "page_end": end_page,
+            "sections": []
+            })
+        # print(normalized_toc[:10])
+        
+        nested_toc = []
+        stack = []
+        
+        for item in normalized_toc:
+            curr_lvl = item.pop("level")
+            
+            while stack and stack[-1][0] >= curr_lvl:
+                stack.pop()
+            
+            if not stack:
+                nested_toc.append(item)
+            else:
+                parent = stack[-1][1]
+                parent["sections"].append(item)
+            
+            stack.append((curr_lvl,item))
+            
+        # for item in nested_toc:
+        #     print(item)
+        #     print("-"*100)
+
+        return nested_toc
+            
+            
 multi_level_toc = [
     {
         "title": "Chapter 1: Process Management",
@@ -90,14 +139,11 @@ multi_level_toc = [
         ]
     }
 ]
-
 tree = TreeBuilder()
-nodes = []
-nodes = tree.compile_tree(toc_skeleton=multi_level_toc)
+nested_toc = tree.extract_nested_toc_from_pdf(pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
 
-for node in nodes:
+chapter_nodes = tree.compile_tree(nested_toc)
+
+for node in chapter_nodes:
     print(node)
-    for child in node.children:
-        print(f"  -> {child}")
-        for subchild in child.children:
-            print(f"      -> {subchild}")
+    print("-"*100)

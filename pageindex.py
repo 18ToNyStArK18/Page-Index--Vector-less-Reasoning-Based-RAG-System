@@ -4,6 +4,9 @@ from models import TreeNode
 import fitz
 from rich.tree import Tree as RichTree
 from rich import print as rich_print
+import asyncio
+from google import genai
+from google.genai import types
 #TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
 #TODO: need to extract the pdf content and pass it accordingly
 #TODO: need to pass it to the llm for proper summary
@@ -35,10 +38,13 @@ def create_pdf_text_extractor(pdf_path: str):
         
     return extract_text
 class TreeBuilder:
-    def __init__(self , max_pages_per_node :int = 10):
+    
+    def __init__(self , max_pages_per_node :int = 10 , max_concurrent_calls: int = 1):
         self.max_pages_per_node = max_pages_per_node
         self.nodes = 1
-    
+        self.semaphore = asyncio.Semaphore(max_concurrent_calls)
+        self.client = genai.Client() 
+             
     def buildLeafNodes(self,title: str , page_start: int , page_end: int)-> List[TreeNode]:
         """
             this takes the content in the section and if the content is large it splits into chuncks
@@ -154,40 +160,50 @@ class TreeBuilder:
             self.visualize_with_rich(child, rich_tree_root)
             
         return rich_tree_root
-    def call_llm_leaf_summary(self,title: str, raw_text: str) -> str:
-        """Mock API Call: Summarizes raw textbook text."""
-        prompt = f"Write a dense, 2-sentence routing summary of this section: '{title}'. Text: {raw_text[:1000]}..."
-        return f"Detailed summary of raw text for {title}."
+    async def call_llm_leaf_summary(self, title: str, raw_text: str) -> str:
+        async with self.semaphore:
+            prompt = f"Write a dense, 2-sentence routing summary... Text: {raw_text[:1000]}"
+            print(f"   [API] Calling LLM for leaf: {title}...")
+            # api call here
+            asyncio.sleep(5)
+            return f"Detailed summary of raw text for {title}."
 
-    def call_llm_branch_summary(self,title: str, child_summaries: list[str]) -> str:
-        """Mock API Call: Synthesizes a parent summary from child summaries."""
-        combined_children = "\n".join([f"- {s}" for s in child_summaries])
-        prompt = f"Synthesize these sub-section summaries into a single overarching summary for the chapter: '{title}'. Sub-sections:\n{combined_children}"
-        return f"High-level rolled-up summary covering {len(child_summaries)} sub-sections."
-    
-    def populate_tree_summaries_dfs(self,node:TreeNode,pdf):
+    async def call_llm_branch_summary(self, title: str, child_summaries: List[str]) -> str:
+        async with self.semaphore:
+            combined_children = "\n".join([f"- {s}" for s in child_summaries])
+            prompt = f"Synthesize these sub-section summaries... Sub-sections:\n{combined_children}"
+            print(f" [API] Calling LLM for branch: {title}...")
+            #api call here
+            
+            return f"High-level rolled-up summary covering {len(child_summaries)} sub-sections."
+
+    async def populate_tree_summaries_dfs(self,node:TreeNode,pdf):
         """
             This is the way i am implementing the summarise
             First get the summaries of the leaf nodes by sending the raw text to llm
             For the branch node send the summaries of all the children and get a unified summary for the branch node    
         """
-        for child in node.children:
-            self.populate_tree_summaries_dfs(child,pdf)
+        if node.children:
+            tasks = [self.populate_tree_summaries_dfs(child, pdf) for child in node.children]
+            await asyncio.gather(*tasks)
         
         if not node.children:
             # this is a leaf node (base case)
             raw_text = pdf(node.page_start,node.page_end)
-            node.summary = self.call_llm_leaf_summary(node.title,raw_text)
+            node.summary = await self.call_llm_leaf_summary(node.title,raw_text)
         else:
             #send the summaries of the children
             child_summaries = [child.summary for child in node.children]
-            node.summary = self.call_llm_branch_summary(node.title,child_summaries)
+            node.summary = await self.call_llm_branch_summary(node.title,child_summaries)
 
 tree = TreeBuilder()
 nested_toc = tree.extract_nested_toc_from_pdf(pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
 pdf = create_pdf_text_extractor("/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
 chapter_nodes = tree.compile_tree(nested_toc)
-for node in chapter_nodes:
-    tree.populate_tree_summaries_dfs(node,pdf)
-for node in chapter_nodes:
-    rich_print(tree.visualize_with_rich(node))
+# for node in chapter_nodes:
+#     tree.populate_tree_summaries_dfs(node,pdf)
+# for node in chapter_nodes:
+#     rich_print(tree.visualize_with_rich(node))
+
+asyncio.run(tree.populate_tree_summaries_dfs(chapter_nodes[2], pdf))
+rich_print(tree.visualize_with_rich(chapter_nodes[2]))

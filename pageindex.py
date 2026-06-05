@@ -4,16 +4,39 @@ from models import TreeNode
 import fitz
 from rich.tree import Tree as RichTree
 from rich import print as rich_print
-
-#TODO: Build the actual toc from the document
-#for this if the metadata has the toc we can get the toc directly using the pymupdf library else
-# we can send the first 20 pages of the document to an llm to generate the toc 
+#TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
 #TODO: need to extract the pdf content and pass it accordingly
 #TODO: need to pass it to the llm for proper summary
 
+
+
+
+def create_pdf_text_extractor(pdf_path: str):
+    """
+    Opens the PDF once and returns a highly efficient extraction function.
+    """
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+    
+    def extract_text(page_start: int, page_end: int) -> str:
+        extracted_text = []
+        
+        start_idx = max(0, page_start - 1)
+        end_idx = min(total_pages - 1, page_end - 1)
+        
+        for i in range(start_idx, end_idx + 1):
+            page = doc.load_page(i)
+            extracted_text.append(page.get_text("text"))
+            
+        raw_string = "\n".join(extracted_text)
+        
+        clean_string = " ".join(raw_string.split())
+        return clean_string
+        
+    return extract_text
 class TreeBuilder:
     def __init__(self , max_pages_per_node :int = 10):
-        self.max_pages_per_node = 10
+        self.max_pages_per_node = max_pages_per_node
         self.nodes = 1
     
     def buildLeafNodes(self,title: str , page_start: int , page_end: int)-> List[TreeNode]:
@@ -120,7 +143,7 @@ class TreeBuilder:
 
     def visualize_with_rich(self,custom_node, rich_tree_root=None):
         """Recursively converts custom TreeNode to a Rich Tree representation."""
-        label = f"[bold yellow]{custom_node.node_id}[/bold yellow]: [cyan]{custom_node.title}[/cyan] (Pages {custom_node.page_start}-{custom_node.page_end})"
+        label = f"[bold yellow]{custom_node.node_id}[/bold yellow]: [cyan]{custom_node.title}[/cyan] (Pages {custom_node.page_start}-{custom_node.page_end})\n (summary: {custom_node.summary})"
         
         if rich_tree_root is None:
             rich_tree_root = RichTree(label)
@@ -131,12 +154,40 @@ class TreeBuilder:
             self.visualize_with_rich(child, rich_tree_root)
             
         return rich_tree_root
+    def call_llm_leaf_summary(self,title: str, raw_text: str) -> str:
+        """Mock API Call: Summarizes raw textbook text."""
+        prompt = f"Write a dense, 2-sentence routing summary of this section: '{title}'. Text: {raw_text[:1000]}..."
+        return f"Detailed summary of raw text for {title}."
 
+    def call_llm_branch_summary(self,title: str, child_summaries: list[str]) -> str:
+        """Mock API Call: Synthesizes a parent summary from child summaries."""
+        combined_children = "\n".join([f"- {s}" for s in child_summaries])
+        prompt = f"Synthesize these sub-section summaries into a single overarching summary for the chapter: '{title}'. Sub-sections:\n{combined_children}"
+        return f"High-level rolled-up summary covering {len(child_summaries)} sub-sections."
+    
+    def populate_tree_summaries_dfs(self,node:TreeNode,pdf):
+        """
+            This is the way i am implementing the summarise
+            First get the summaries of the leaf nodes by sending the raw text to llm
+            For the branch node send the summaries of all the children and get a unified summary for the branch node    
+        """
+        for child in node.children:
+            self.populate_tree_summaries_dfs(child,pdf)
+        
+        if not node.children:
+            # this is a leaf node (base case)
+            raw_text = pdf(node.page_start,node.page_end)
+            node.summary = self.call_llm_leaf_summary(node.title,raw_text)
+        else:
+            #send the summaries of the children
+            child_summaries = [child.summary for child in node.children]
+            node.summary = self.call_llm_branch_summary(node.title,child_summaries)
 
 tree = TreeBuilder()
 nested_toc = tree.extract_nested_toc_from_pdf(pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
-
+pdf = create_pdf_text_extractor("/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
 chapter_nodes = tree.compile_tree(nested_toc)
-
+for node in chapter_nodes:
+    tree.populate_tree_summaries_dfs(node,pdf)
 for node in chapter_nodes:
     rich_print(tree.visualize_with_rich(node))

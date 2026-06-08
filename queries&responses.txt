@@ -1,0 +1,47 @@
+Query1:
+    What is the formal mathematical definition of a deterministic finite automaton (DFA)?
+Response:
+    {
+        "node_ids": [
+            "node_36"
+        ]
+    }
+
+Query2:
+    "What is the difference between a Turing-recognizable language and a Turing-decidable language?"
+Response:
+   {
+        "node_ids": [
+            "node_164",
+            "node_153",
+            "node_140"
+        ]
+    } 
+
+Query3:
+    How does the pumping lemma prove that the language $A = \{0^n1^n \mid n \ge 0\}$ is not regular?"
+Response:
+{
+    "node_ids": [
+        "node_66"
+    ]
+}
+
+Query4:
+    What does the Church-Turing thesis state about the definition of an algorithm?"
+Response:
+{
+    "node_ids": [
+      "node_128"
+    ]
+}
+Query5:
+    "Is the boolean satisfiability problem (SAT) in P or NP, and why?"
+Response:
+{
+    "node_ids": [
+        "node_195",
+        "node_193",
+        "node_191"
+    ]
+}

@@ -7,8 +7,10 @@ from rich import print as rich_print
 import asyncio
 import aiohttp
 from dbmanager import TreeDB
+from google import genai
+from google.genai import types
+
 #TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
-#TODO: write the toc into some db so that we dont need to create a toc for the same pdf multiple times
 
 
 def create_pdf_text_extractor(pdf_path: str):
@@ -265,35 +267,84 @@ def visualize_with_rich(custom_node, rich_tree_root=None):
             visualize_with_rich(child, rich_tree_root)
             
         return rich_tree_root
-
+async def get_nodes(query : str , rootNode: TreeNode , model : str,client):
+    """This is the retrieval phase where the we pass the question and the tree to llm"""
+    
+    tree_search_prompt = f"""
+    Given the document tree and query, return the node IDs to retrieve.
+    return the node IDs of the leaf node only and give the most relavent node first 
+    Tree: {rootNode} 
+    Query: {query}
+    Return JSON only: {{"node_ids": ["node_1", "node_2"]}}
+    """
+    print(f" [GEMINI API] Calling {model} to get the required nodes for the query {query} ")
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=tree_search_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                response_mime_type="application/json",
+            )
+        )
+        
+        result = response.text
+        
+    except Exception as e:
+        print(f"   [ERROR] Failed on '{query}': {e}")
+        # Return a safe fallback JSON if the API fails
+        result = '{"node_ids": []}'
+    print(result)
+    print("-"*100)
+    return result
+    
+    
+    
+    
+    
 async def main(): 
-    ## create a tree
-    tree = TreeBuilder()
-    pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf"
-
-    ##get the toc
-    nested_toc = tree.extract_nested_toc_from_pdf(pdf_path)
-    pdf = create_pdf_text_extractor(pdf_path)
-
-    ## create the tree with the help of the toc we extracted 
-    chapter_nodes = tree.compile_tree(nested_toc)
-
-    ## dummy root node
-    rootNode = TreeNode("root","root","na",0,0)
-    for node in chapter_nodes:
-        rootNode.children.append(node)
-
-    ## populate all the children
-    for node in rootNode.children:
-        await tree.populate_tree_summaries_dfs(node,pdf)
-        
-        
-        
-    ## to save it in the database
-    tree_dict = to_dict(rootNode)
     dbManager = TreeDB()
-    dbManager.save_tree(pdf_path,tree_dict)
+    pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf"
+    rootNode = None
+    tree = TreeBuilder()
+    
+    ## check if its in the db
+    tree_dict = dbManager.load_tree(pdf_path)
+    if tree_dict is None:
+        ## create a tree
+        ##get the toc
+        nested_toc = tree.extract_nested_toc_from_pdf(pdf_path)
+        pdf = create_pdf_text_extractor(pdf_path)
 
+        ## create the tree with the help of the toc we extracted 
+        chapter_nodes = tree.compile_tree(nested_toc)
+
+        ## dummy root node
+        rootNode = TreeNode("root","root","na",0,0)
+        for node in chapter_nodes:
+            rootNode.children.append(node)
+
+        ## populate all the children
+        for node in rootNode.children:
+            await tree.populate_tree_summaries_dfs(node,pdf)
+            
+            
+            
+        ## to save it in the database
+        tree_dict = to_dict(rootNode)
+        dbManager.save_tree(pdf_path,tree_dict)
+
+    else:
+        # print(tree_dict)
+        rootNode = dict_to_tree(tree_dict["tree"])
+        
+    # rich_print(visualize_with_rich(rootNode))
+    
+    ## for the query
+    client = genai.Client()
+    query = input("Enter the query: ")
+    model = "gemini-2.5-flash"
+    node_ids = await get_nodes(query,rootNode,model,client)
 
 
 if __name__ == "__main__":

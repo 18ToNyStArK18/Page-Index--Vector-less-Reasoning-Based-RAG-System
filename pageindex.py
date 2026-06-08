@@ -6,9 +6,9 @@ from rich.tree import Tree as RichTree
 from rich import print as rich_print
 import asyncio
 import aiohttp
-
+from dbmanager import TreeDB
 #TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
-
+#TODO: write the toc into some db so that we dont need to create a toc for the same pdf multiple times
 
 
 def create_pdf_text_extractor(pdf_path: str):
@@ -40,9 +40,9 @@ class TreeBuilder:
         self.max_pages_per_node = max_pages_per_node
         self.nodes = 1
         self.semaphore = asyncio.Semaphore(max_concurrent_calls)
-        self.local_model = "llama3.2:3b"
+        self.local_model = "llama3.2:1b"
         self.ollama_url = "http://localhost:11434/api/generate"
-         
+     
     def buildLeafNodes(self,title: str , page_start: int , page_end: int)-> List[TreeNode]:
         """
             this takes the content in the section and if the content is large it splits into chuncks
@@ -100,6 +100,7 @@ class TreeBuilder:
             chapter_nodes.append(self.process_toc_nodes(item))
         return chapter_nodes
     
+    
     def extract_nested_toc_from_pdf(self,pdf_path: str) -> List[Dict[str, Any]]:
         """ this function extracts the toc from the documment and then returns the toc skeleton"""
         doc = fitz.open(pdf_path)
@@ -144,20 +145,6 @@ class TreeBuilder:
             stack.append((curr_lvl,item))
             
         return nested_toc
-
-    def visualize_with_rich(self,custom_node, rich_tree_root=None):
-        """Recursively converts custom TreeNode to a Rich Tree representation."""
-        label = f"[bold yellow]{custom_node.node_id}[/bold yellow]: [cyan]{custom_node.title}[/cyan] (Pages {custom_node.page_start}-{custom_node.page_end})\n (summary: {custom_node.summary})"
-        
-        if rich_tree_root is None:
-            rich_tree_root = RichTree(label)
-        else:
-            rich_tree_root = rich_tree_root.add(label)
-            
-        for child in custom_node.children:
-            self.visualize_with_rich(child, rich_tree_root)
-            
-        return rich_tree_root
     
     async def call_llm_leaf_summary(self, title: str, raw_text: str) -> str:
         async with self.semaphore:
@@ -167,7 +154,7 @@ class TreeBuilder:
             Capture the core concepts and keywords to help a search engine find this page later.
             
             Text Content:
-            {raw_text[:3000]} 
+            {raw_text} 
             """
             print(f"   [Local API] Calling {self.local_model} for leaf: {title}...")
             
@@ -177,14 +164,17 @@ class TreeBuilder:
                         "model": self.local_model,
                         "prompt": prompt,
                         "stream": False,
-                        "options": {"temperature": 0.2}
+                        "options": {
+                            "temperature": 0.2,
+                        }
                     }) as response:
                         result_data = await response.json()
                         result = result_data['response'].strip()
             except Exception as e:
                 print(f"   [ERROR] Failed on {title}: {e}")
                 result = f"Summary unavailable for {title} due to local API error."
-
+            print(result)
+            print("-"*100)
             return result
     
     async def call_llm_branch_summary(self, title: str, child_summaries: List[str]) -> str:
@@ -212,7 +202,8 @@ class TreeBuilder:
             except Exception as e:
                 print(f" [ERROR] Failed on branch {title}: {e}")
                 result = f"Branch summary unavailable for {title}."
-
+            print(result)
+            print("-"*100)
             return result
 
     async def populate_tree_summaries_dfs(self,node:TreeNode,pdf):
@@ -234,14 +225,73 @@ class TreeBuilder:
             child_summaries = [child.summary for child in node.children]
             node.summary = await self.call_llm_branch_summary(node.title,child_summaries)
 
+def to_dict(node : TreeNode):
+    return {
+        "node_id": node.node_id,
+        "title": node.title,
+        "page_start": node.page_start,
+        "page_end": node.page_end,
+        "summary": node.summary,
+        "children": [to_dict(child) for child in node.children]
+    }
+    
+def dict_to_tree(tree_dict: Dict[str, Any]) -> TreeNode:
+    """
+    Recursively converts a nested dictionary back into a full TreeNode hierarchy.
+    """
+    node = TreeNode(
+        node_id=tree_dict["node_id"],
+        title=tree_dict["title"],
+        page_start=tree_dict["page_start"],
+        page_end=tree_dict["page_end"],
+        summary=tree_dict.get("summary")
+    )
+    
+    if "children" in tree_dict:
+        node.children = [dict_to_tree(child_dict) for child_dict in tree_dict["children"]]
+        
+    return node
+ 
+def visualize_with_rich(custom_node, rich_tree_root=None):
+        """Recursively converts custom TreeNode to a Rich Tree representation."""
+        label = f"[bold yellow]{custom_node.node_id}[/bold yellow]: [cyan]{custom_node.title}[/cyan] (Pages {custom_node.page_start}-{custom_node.page_end})\n (summary: {custom_node.summary})"
+        
+        if rich_tree_root is None:
+            rich_tree_root = RichTree(label)
+        else:
+            rich_tree_root = rich_tree_root.add(label)
+            
+        for child in custom_node.children:
+            visualize_with_rich(child, rich_tree_root)
+            
+        return rich_tree_root
+    
+## create a tree
 tree = TreeBuilder()
-nested_toc = tree.extract_nested_toc_from_pdf(pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
-pdf = create_pdf_text_extractor("/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf")
-chapter_nodes = tree.compile_tree(nested_toc)
-# for node in chapter_nodes:
-#     tree.populate_tree_summaries_dfs(node,pdf)
-# for node in chapter_nodes:
-#     rich_print(tree.visualize_with_rich(node))
+pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf"
 
-asyncio.run(tree.populate_tree_summaries_dfs(chapter_nodes[4], pdf))
-rich_print(tree.visualize_with_rich(chapter_nodes[4]))
+##get the toc
+nested_toc = tree.extract_nested_toc_from_pdf(pdf_path)
+pdf = create_pdf_text_extractor(pdf_path)
+
+## create the tree with the help of the toc we extracted 
+chapter_nodes = tree.compile_tree(nested_toc)
+
+## dummy root node
+rootNode = TreeNode("root","root","na",0,0)
+for node in chapter_nodes:
+    rootNode.children.append(node)
+
+## populate all the children
+for node in rootNode.children:
+    asyncio.run(tree.populate_tree_summaries_dfs(node,pdf))
+    
+    
+    
+## to save it in the database
+tree_dict = to_dict(rootNode)
+dbManager = TreeDB()
+dbManager.save_tree(pdf_path,tree_dict)
+
+
+

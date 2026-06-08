@@ -265,33 +265,36 @@ def visualize_with_rich(custom_node, rich_tree_root=None):
             visualize_with_rich(child, rich_tree_root)
             
         return rich_tree_root
-    
-## create a tree
-tree = TreeBuilder()
-pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf"
 
-##get the toc
-nested_toc = tree.extract_nested_toc_from_pdf(pdf_path)
-pdf = create_pdf_text_extractor(pdf_path)
+async def main(): 
+    ## create a tree
+    tree = TreeBuilder()
+    pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf"
 
-## create the tree with the help of the toc we extracted 
-chapter_nodes = tree.compile_tree(nested_toc)
+    ##get the toc
+    nested_toc = tree.extract_nested_toc_from_pdf(pdf_path)
+    pdf = create_pdf_text_extractor(pdf_path)
 
-## dummy root node
-rootNode = TreeNode("root","root","na",0,0)
-for node in chapter_nodes:
-    rootNode.children.append(node)
+    ## create the tree with the help of the toc we extracted 
+    chapter_nodes = tree.compile_tree(nested_toc)
 
-## populate all the children
-for node in rootNode.children:
-    asyncio.run(tree.populate_tree_summaries_dfs(node,pdf))
-    
-    
-    
-## to save it in the database
-tree_dict = to_dict(rootNode)
-dbManager = TreeDB()
-dbManager.save_tree(pdf_path,tree_dict)
+    ## dummy root node
+    rootNode = TreeNode("root","root","na",0,0)
+    for node in chapter_nodes:
+        rootNode.children.append(node)
+
+    ## populate all the children
+    for node in rootNode.children:
+        await tree.populate_tree_summaries_dfs(node,pdf)
+        
+        
+        
+    ## to save it in the database
+    tree_dict = to_dict(rootNode)
+    dbManager = TreeDB()
+    dbManager.save_tree(pdf_path,tree_dict)
 
 
 
+if __name__ == "__main__":
+    asyncio.run(main())

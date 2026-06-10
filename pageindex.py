@@ -343,7 +343,7 @@ async def main():
     ## for the query
     client = genai.Client()
     query = input("Enter the query: ")
-    model = "gemini-2.5-flash"
+    model = "gemini-3.5-flash"
     node_ids = await get_nodes(query,rootNode,model,client)
 
 

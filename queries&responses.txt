@@ -45,3 +45,51 @@ Response:
         "node_191"
     ]
 }
+
+Query6:
+    "How do you construct a pushdown automaton that recognizes the exact same language as a given context-free grammar?"
+Response:
+{
+  "node_ids": [
+    "node_103",
+    "node_92"
+  ]
+}
+
+Query7:
+    "Explain the pigeon hole principle"
+Response:
+{
+  "node_ids": [
+    "node_24"
+  ]
+}
+
+Query8:
+    "What specific string $s$ is chosen in the text to prove that the language $\{a^n b^n c^n \mid n \ge 0\}$ is NOT context-free?"
+Response:
+{
+  "node_ids": [
+    "node_108"
+  ]
+}
+
+Query9:
+    "To prove the Halting problem is undecidable, what specific hypothetical machine does the text construct to create a contradiction, and what does that machine do with the subroutine $H$?"
+Response:
+{
+  "node_ids": [
+    "node_142",
+    "node_145"
+  ]
+}
+
+Query10:
+    "For six possible cases in finite automata how much memory is required in bits?"
+Response:
+{
+  "node_ids": [
+    "node_33"
+  ]
+}
+

@@ -8,10 +8,8 @@ import asyncio
 import aiohttp
 from dbmanager import TreeDB
 from google import genai
-from google.genai import types
-
-#TODO: fall back for the toc if the meta data doesnt have a toc then send it to the lmm to create a toc
-
+import json
+from queryhandler import QueryHandler
 
 def create_pdf_text_extractor(pdf_path: str):
     """
@@ -267,46 +265,15 @@ def visualize_with_rich(custom_node, rich_tree_root=None):
             visualize_with_rich(child, rich_tree_root)
             
         return rich_tree_root
-async def get_nodes(query : str , rootNode: TreeNode , model : str,client):
-    """This is the retrieval phase where the we pass the question and the tree to llm"""
-    
-    tree_search_prompt = f"""
-    Given the document tree and query, return the node IDs to retrieve.
-    return the node IDs of the leaf node only and give the most relavent node first 
-    Tree: {rootNode} 
-    Query: {query}
-    Return JSON only: {{"node_ids": ["node_1", "node_2"]}}
-    """
-    print(f" [GEMINI API] Calling {model} to get the required nodes for the query {query} ")
-    try:
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=tree_search_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                response_mime_type="application/json",
-            )
-        )
-        
-        result = response.text
-        
-    except Exception as e:
-        print(f"   [ERROR] Failed on '{query}': {e}")
-        # Return a safe fallback JSON if the API fails
-        result = '{"node_ids": []}'
-    print(result)
-    print("-"*100)
-    return result
     
     
-    
-    
-    
+
 async def main(): 
     dbManager = TreeDB()
-    pdf_path = "/home/vedavyas/forfun/RAG/TheoryOfComputation.pdf"
+    pdf_path = "./TheoryOfComputation.pdf"
     rootNode = None
     tree = TreeBuilder()
+    pdf = create_pdf_text_extractor(pdf_path)
     
     ## check if its in the db
     tree_dict = dbManager.load_tree(pdf_path)
@@ -314,7 +281,6 @@ async def main():
         ## create a tree
         ##get the toc
         nested_toc = tree.extract_nested_toc_from_pdf(pdf_path)
-        pdf = create_pdf_text_extractor(pdf_path)
 
         ## create the tree with the help of the toc we extracted 
         chapter_nodes = tree.compile_tree(nested_toc)
@@ -342,9 +308,25 @@ async def main():
     
     ## for the query
     client = genai.Client()
-    query = input("Enter the query: ")
     model = "gemini-3.5-flash"
-    node_ids = await get_nodes(query,rootNode,model,client)
+    model2 = "gemini-2.5-flash"
+    q = QueryHandler(client,model,model2)
+    while True:
+        query = input("Enter the query: ")
+        if query == "EXIT":
+            break
+        node_ids_json = await q.get_nodes(query,rootNode)
+        try:
+            retrieval_data = json.loads(node_ids_json)
+            target_ids = retrieval_data.get("node_ids", [])
+        except json.JSONDecodeError:
+            print(" Router returned invalid JSON. Try again.")
+            continue
+        finalans = await q.generate_final_answer(query,target_ids,rootNode,pdf)
+        print(finalans)
+        print("-"*100)
+        print()
+        print()
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ class TreeBuilder:
         self.max_pages_per_node = max_pages_per_node
         self.nodes = 1
         self.semaphore = asyncio.Semaphore(max_concurrent_calls)
-        self.local_model = "llama3.2:1b"
+        self.local_model = "llama3.2:3b"
         self.ollama_url = "http://localhost:11434/api/generate"
      
     def buildLeafNodes(self,title: str , page_start: int , page_end: int)-> List[TreeNode]:
@@ -308,9 +308,9 @@ async def main():
     
     ## for the query
     client = genai.Client()
-    model = "gemini-3.5-flash"
+    model1 = "gemini-3.5-flash"
     model2 = "gemini-2.5-flash"
-    q = QueryHandler(client,model,model2)
+    q = QueryHandler(client,model1,model2)
     while True:
         query = input("Enter the query: ")
         if query == "EXIT":
